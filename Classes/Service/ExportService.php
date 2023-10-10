@@ -240,18 +240,38 @@ class ExportService extends AbstractService
                 }
 
                 if (!$sourceContext->isInvisibleContentShown()) {
+                    $rootNodeIdentifier = $sourceContext->getRootNode()->getNodeData()->getIdentifier();
                     // filter out node if any of the parents is hidden
-                    $parent = $nodeData;
+                    $currentNodeData = $nodeData;
                     while (true) {
-                        if ($parent->isHidden()) {
+                        if ($currentNodeData->isHidden()) {
+                            // The node itself is hidden
                             return false;
                         }
-                        $parentNode = $sourceContext->getNode($parent->getParentPath());
-                        if (!$parentNode instanceof NodeInterface
-                            || $parentNode->getNodeData()->getDimensionValues() === []) {
+
+                        if ($currentNodeData->getIdentifier() === $rootNodeIdentifier) {
+                            // we reached the root node, so the neither the tested node nor any of his parents are
+                            // hidden
+                            break;  // exit while loop
+                        }
+
+                        $parentNode = $sourceContext->getNode($currentNodeData->getParentPath());
+
+                        if (!($parentNode instanceof NodeInterface)) {
+                            // parent is hidden
+                            // WHY: We are not the root node but we also couldn't find the parent node in the
+                            //      sourceContext. Probably because the context->getNode() returns null for
+                            //      hidden nodes if invisibleContentShown is false.
+                            return false;
+                        }
+
+                        // TODO: What is this testing?
+                        if ($parentNode->getNodeData()->getDimensionValues() === []) {
                             break;
                         }
-                        $parent = $parentNode->getNodeData();
+
+                        // Test parent
+                        $currentNodeData = $parentNode->getNodeData();
                     }
                 }
 
