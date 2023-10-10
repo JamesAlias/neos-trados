@@ -362,7 +362,12 @@ class ExportService extends AbstractService
 
                 $declaredPropertyType = $nodeType->getPropertyType($propertyName);
                 if ($declaredPropertyType === 'string') {
-                    $this->writeProperty($propertyName, $propertyValue);
+                    // $propertyValue could be literally anything, as we are checking the "configured" type here,
+                    // not the actual type of the property value. So we have to explicitly check for string and null.
+                    // (node:repair only implicitly saves us here, because we would have to have run it^^)
+                    if (is_string($propertyValue) || is_null($propertyValue)) {
+                        $this->writeProperty($propertyName, $propertyValue);
+                    }
                 }
             }
         }
@@ -373,7 +378,7 @@ class ExportService extends AbstractService
     {
         $this->xmlWriter->startElement($propertyName);
         $this->xmlWriter->writeAttribute('type', 'string');
-        if ($propertyValue !== '') {
+        if ($propertyValue !== '' && !is_null($propertyValue)) {
             $this->xmlWriter->startCData();
             $this->xmlWriter->text($propertyValue);
             $this->xmlWriter->endCData();
