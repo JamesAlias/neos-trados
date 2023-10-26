@@ -4,3 +4,9 @@ Flownative:
       languageDimension: 'language'
       export:
         workspace: 'live'
+        # Filter out NodeTypes that will not appear in the Trados export.
+        # Example:
+        #   nodeTypeFilter:
+        #    - 'My.Package:TypeThatWillBeIgnored'
+        #    - 'My.Package:OtherTypeThatWillBeIgnored'
+        nodeTypeFilter: []

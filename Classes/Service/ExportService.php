@@ -37,6 +37,12 @@ class ExportService extends AbstractService
     protected string $workspaceName;
 
     /**
+     * @Flow\InjectConfiguration(path = "export.nodeTypeFilter")
+     * @var string[]
+     */
+    protected array $nodeTypeFilter;
+
+    /**
      * @Flow\Inject
      * @var NodeDataRepository
      */
@@ -67,7 +73,8 @@ class ExportService extends AbstractService
         \DateTime $modifiedAfter = null,
         bool $ignoreHidden = true,
         bool $excludeChildDocuments = false
-    ): void {
+    ): void
+    {
         $this->startingPoint = $startingPoint;
         $this->sourceLanguage = $sourceLanguage;
         $this->targetLanguage = $targetLanguage;
@@ -102,6 +109,15 @@ class ExportService extends AbstractService
         }
     }
 
+    protected function getAllowedContentCombinationsForSourceLanguage(string $sourceLanguage): array
+    {
+        $allAllowedContentCombinations = $this->contentDimensionCombinator->getAllAllowedCombinations();
+
+        return array_filter($allAllowedContentCombinations, function ($combination) use ($sourceLanguage) {
+            return (isset($combination[$this->languageDimension]) && $combination[$this->languageDimension][0] === $sourceLanguage);
+        });
+    }
+
     /**
      * Fetches the site with the given name and exports it into XML.
      *
@@ -117,22 +133,6 @@ class ExportService extends AbstractService
         $this->exportToXmlWriter();
 
         return $this->xmlWriter->outputMemory();
-    }
-
-    /**
-     * Export into the given file.
-     *
-     * @throws \Exception
-     */
-    public function exportToFile(string $pathAndFilename): void
-    {
-        $this->xmlWriter = new \XMLWriter();
-        $this->xmlWriter->openUri($pathAndFilename);
-        $this->xmlWriter->setIndent(true);
-
-        $this->exportToXmlWriter();
-
-        $this->xmlWriter->flush();
     }
 
     /**
@@ -228,6 +228,7 @@ class ExportService extends AbstractService
             /** @var ContentContext $sourceContext */
             foreach ($sourceContexts as $sourceContext) {
                 if ($sourceContext->getDimensions()[$this->languageDimension][0] !== $this->sourceLanguage) {
+                    // wrong language sourceContext
                     continue;
                 }
                 if ($nodeData->getDimensionValues()[$this->languageDimension][0] !== $this->sourceLanguage) {
@@ -237,6 +238,21 @@ class ExportService extends AbstractService
                         continue;
                     }
                     $nodeData = $node->getNodeData();
+                }
+
+                // Ignore nodes with filtered NodeType
+                // see `Flownative.Neos.Trados.export.nodeTypeFilter` configuration option
+                if (in_array($nodeData->getNodeType()->getName(), $this->nodeTypeFilter)) {
+                    return false;
+                }
+
+                // Ignore nodes that have not been modified after the given date
+                if (!is_null($this->modifiedAfter)) {
+                    $lastModified = $nodeData->getLastModificationDateTime();
+
+                    if ($lastModified < $this->modifiedAfter) {
+                        return false;
+                    }
                 }
 
                 if (!$sourceContext->isInvisibleContentShown()) {
@@ -250,8 +266,8 @@ class ExportService extends AbstractService
                         }
 
                         if ($currentNodeData->getIdentifier() === $rootNodeIdentifier) {
-                            // we reached the root node, so the neither the tested node nor any of his parents are
-                            // hidden
+                            // we reached the root node,
+                            // so the neither the tested node nor any of his parents are hidden
                             break;  // exit while loop
                         }
 
@@ -274,15 +290,6 @@ class ExportService extends AbstractService
                         $currentNodeData = $parentNode->getNodeData();
                     }
                 }
-
-                if (!is_null($this->modifiedAfter)) {
-                    // filter out node if last modification date is _before_ modifiedAfter option
-                    $lastModified = $nodeData->getLastModificationDateTime();
-
-                    if ($lastModified < $this->modifiedAfter) {
-                        return false;
-                    }
-                }
             }
 
             return true;
@@ -301,6 +308,22 @@ class ExportService extends AbstractService
         );
 
         return $nodeDataList;
+    }
+
+    /**
+     * This function recursively traverses all nodes underneath $node which are content; and calls
+     * $callback on each of them (Depth-First Traversal).
+     *
+     * @throws IllegalObjectTypeException
+     */
+    private function collectContentNodes(NodeData $node, array $contentDimensions, ContentContext $contentContext, array &$nodes): void
+    {
+        $nodes[] = $node;
+
+        $childNodes = $this->nodeDataRepository->findByParentAndNodeType($node->getPath(), '!Neos.Neos:Document', $contentContext->getWorkspace(), $contentDimensions, $contentContext->isRemovedContentShown() ? null : false);
+        foreach ($childNodes as $childNode) {
+            $this->collectContentNodes($childNode, $contentDimensions, $contentContext, $nodes);
+        }
     }
 
     /**
@@ -406,28 +429,19 @@ class ExportService extends AbstractService
         $this->xmlWriter->endElement();
     }
 
-    protected function getAllowedContentCombinationsForSourceLanguage(string $sourceLanguage): array
-    {
-        $allAllowedContentCombinations = $this->contentDimensionCombinator->getAllAllowedCombinations();
-
-        return array_filter($allAllowedContentCombinations, function ($combination) use ($sourceLanguage) {
-            return (isset($combination[$this->languageDimension]) && $combination[$this->languageDimension][0] === $sourceLanguage);
-        });
-    }
-
     /**
-     * This function recursively traverses all nodes underneath $node which are content; and calls
-     * $callback on each of them (Depth-First Traversal).
+     * Export into the given file.
      *
-     * @throws IllegalObjectTypeException
+     * @throws \Exception
      */
-    private function collectContentNodes(NodeData $node, array $contentDimensions, ContentContext $contentContext, array &$nodes): void
+    public function exportToFile(string $pathAndFilename): void
     {
-        $nodes[] = $node;
+        $this->xmlWriter = new \XMLWriter();
+        $this->xmlWriter->openUri($pathAndFilename);
+        $this->xmlWriter->setIndent(true);
 
-        $childNodes = $this->nodeDataRepository->findByParentAndNodeType($node->getPath(), '!Neos.Neos:Document', $contentContext->getWorkspace(), $contentDimensions, $contentContext->isRemovedContentShown() ? null : false);
-        foreach ($childNodes as $childNode) {
-            $this->collectContentNodes($childNode, $contentDimensions, $contentContext, $nodes);
-        }
+        $this->exportToXmlWriter();
+
+        $this->xmlWriter->flush();
     }
 }
